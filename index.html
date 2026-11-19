@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Live Weather Dashboard | Project 04 - InternCircle</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Arial,sans-serif;background:linear-gradient(180deg,#0b3d91,#0ea5e9);min-height:100vh;color:#0f172a;padding:24px 14px}
+.wrap{max-width:920px;margin:0 auto}
+header{text-align:center;color:#fff;margin-bottom:20px}
+header h1{font-size:30px}
+header p{opacity:.9;margin-top:6px}
+.card{background:#fff;border-radius:16px;padding:22px;box-shadow:0 10px 30px rgba(0,0,0,.2)}
+form{display:flex;gap:10px}
+input{flex:1;padding:13px;border:2px solid #e2e8f0;border-radius:10px;font-size:16px}
+input:focus{outline:3px solid #0ea5e9;border-color:#0ea5e9}
+button{padding:13px 22px;border:0;border-radius:10px;background:#0b3d91;color:#fff;font-weight:700;cursor:pointer;font-size:16px}
+button:disabled{opacity:.6;cursor:not-allowed}
+button:focus-visible,input:focus-visible{outline:3px solid #f59e0b;outline-offset:2px}
+.hint{font-size:13px;color:#475569;margin-top:8px}
+#status{margin:16px 0;padding:12px;border-radius:10px;background:#eff6ff;color:#1e40af;font-weight:600;display:none}
+#status.error{background:#fef2f2;color:#991b1b}
+#status.success{background:#f0fdf4;color:#166534}
+.toprow{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.unit{display:inline-flex;background:#e2e8f0;border-radius:999px;padding:3px;gap:3px}
+.unit button{padding:7px 16px;background:transparent;color:#334155;border-radius:999px;font-size:14px}
+.unit button.active{background:#0b3d91;color:#fff}
+.current{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-top:16px}
+.current h2{font-size:24px}
+.big{font-size:56px;font-weight:800;line-height:1}
+.label{font-size:18px;color:#334155;font-weight:700}
+.meta{color:#475569;margin-top:6px;font-size:14px}
+.forecast{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-top:16px}
+.day{background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:14px;text-align:center}
+.day b{display:block}
+.day .t{font-size:19px;font-weight:800;margin:8px 0 4px}
+.day span{color:#475569;font-size:13px}
+.empty{text-align:center;color:#64748b;padding:20px}
+.recent{margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.recent span{font-size:13px;color:#475569}
+.chip{border:1px solid #cbd5e1;background:#f8fafc;padding:6px 12px;border-radius:999px;cursor:pointer;font-size:13px}
+.chip:hover{background:#e0f2fe}
+@media(max-width:700px){.forecast{grid-template-columns:repeat(2,1fr)}.current{flex-direction:column;align-items:flex-start}.big{font-size:44px}form{flex-direction:column}header h1{font-size:24px}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<main class="wrap">
+<header>
+<h1>Live Weather Dashboard</h1>
+<p>Search a city to see live temperature and 5-day forecast</p>
+</header>
+
+<section class="card">
+<div class="toprow">
+<p style="font-weight:700">Search City</p>
+<div class="unit" role="group" aria-label="Temperature unit">
+<button id="btnC" class="active" aria-pressed="true">°C</button>
+<button id="btnF" aria-pressed="false">°F</button>
+</div>
+</div>
+
+<form id="form" style="margin-top:12px">
+<label for="city" style="position:absolute;left:-9999px">City name</label>
+<input id="city" type="text" placeholder="Type a city name... e.g. Udupi, Pune, London" autocomplete="off">
+<button id="searchBtn" type="submit">Search</button>
+</form>
+<p class="hint">Tip: Press Enter or Search. Try Udupi, Mumbai, Delhi, London, New York.</p>
+
+<div class="recent" id="recentWrap" hidden>
+<span>Recent:</span><span id="recent"></span>
+</div>
+
+<p id="status" role="status" aria-live="polite"></p>
+<div id="current"></div>
+<div id="forecast" class="forecast"></div>
+<p id="empty" class="empty">No weather yet. Search a city above to get started.</p>
+<p id="updated" class="meta" style="text-align:right;margin-top:10px"></p>
+</section>
+<p style="text-align:center;color:#fff;margin-top:12px;font-size:13px">Data: Open-Meteo Geocoding + Forecast API • No API key needed</p>
+</main>
+
+<script>
+// 1. API URLs in ONE place - easy to change (PDF requirement)
+var GEO_URL = "https://geocoding-api.open-meteo.com/v1/search?count=1&name=";
+var FORECAST_URL = "https://api.open-meteo.com/v1/forecast?current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min,weather_code&forecast_days=5&timezone=auto&latitude=";
+
+var form = document.getElementById("form");
+var cityInput = document.getElementById("city");
+var statusEl = document.getElementById("status");
+var currentEl = document.getElementById("current");
+var forecastEl = document.getElementById("forecast");
+var emptyEl = document.getElementById("empty");
+var searchBtn = document.getElementById("searchBtn");
+var updatedEl = document.getElementById("updated");
+var recentEl = document.getElementById("recent");
+var recentWrap = document.getElementById("recentWrap");
+var btnC = document.getElementById("btnC");
+var btnF = document.getElementById("btnF");
+
+var unit = localStorage.getItem("unit") || "C";
+var lastWeather = null, lastCityObj = null;
+var recents = JSON.parse(localStorage.getItem("recents") || "[]");
+
+function setUnit(u){
+  unit = u;
+  localStorage.setItem("unit", u);
+  btnC.classList.toggle("active", u==="C");
+  btnF.classList.toggle("active", u==="F");
+  btnC.setAttribute("aria-pressed", String(u==="C"));
+  btnF.setAttribute("aria-pressed", String(u==="F"));
+  if(lastWeather) render(lastWeather.current, lastWeather.daily, lastCityObj);
+}
+btnC.addEventListener("click", function(){ setUnit("C"); });
+btnF.addEventListener("click", function(){ setUnit("F"); });
+setUnit(unit);
+
+function fmtTemp(c){ return unit==="C" ? Math.round(c)+"°C" : Math.round(c*9/5+32)+"°F"; }
+
+function showStatus(msg, type){
+  statusEl.style.display = "block";
+  statusEl.textContent = msg;
+  statusEl.className = type || "";
+  if(type) statusEl.classList.add(type);
+}
+
+// 2. Map weather codes to emoji-free labels (PDF Step 5)
+function weatherLabel(code){
+  var map = {0:"Clear sky",1:"Mainly clear",2:"Partly cloudy",3:"Overcast",45:"Fog",48:"Depositing rime fog",51:"Light drizzle",53:"Moderate drizzle",55:"Dense drizzle",61:"Slight rain",63:"Moderate rain",65:"Heavy rain",71:"Slight snow",73:"Moderate snow",75:"Heavy snow",80:"Slight rain showers",81:"Moderate rain showers",82:"Violent rain showers",95:"Thunderstorm",96:"Thunderstorm with slight hail",99:"Thunderstorm with heavy hail"};
+  return map[code] || "Unknown weather";
+}
+
+// 3. findCity + getWeather - async/await, response.ok, encodeURIComponent (PDF Step 3-4)
+async function findCity(name){
+  var res = await fetch(GEO_URL + encodeURIComponent(name));
+  if(!res.ok) throw new Error("The search service is not responding. Please try again.");
+  var data = await res.json();
+  if(!data.results || !data.results.length) throw new Error("City not found. Check spelling and try again - e.g. Udupi, Pune, London.");
+  var c = data.results[0];
+  return { name: c.name, country: c.country, lat: c.latitude, lon: c.longitude };
+}
+async function getWeather(lat, lon){
+  var res = await fetch(FORECAST_URL + lat + "&longitude=" + lon);
+  if(!res.ok) throw new Error("Could not load the forecast. Please try again.");
+  return await res.json();
+}
+
+// 4. Dynamic DOM injection with textContent only - NO innerHTML for user data (PDF Step 6)
+function render(current, daily, city){
+  emptyEl.style.display = "none";
+  currentEl.innerHTML = ""; forecastEl.innerHTML = "";
+  var div = document.createElement("div");
+  var h2 = document.createElement("h2"); h2.textContent = city.name + ", " + city.country;
+  var meta = document.createElement("p"); meta.className = "meta";
+  meta.textContent = "Today • " + new Date().toLocaleDateString(undefined, {weekday:"long", day:"numeric", month:"long", year:"numeric"});
+  div.appendChild(h2); div.appendChild(meta);
+  var right = document.createElement("div");
+  var big = document.createElement("p"); big.className = "big"; big.textContent = fmtTemp(current.temperature_2m);
+  var lab = document.createElement("p"); lab.className = "label"; lab.textContent = weatherLabel(current.weather_code);
+  var sub = document.createElement("p"); sub.className = "meta";
+  sub.textContent = "High: " + fmtTemp(daily.temperature_2m_max[0]) + " • Low: " + fmtTemp(daily.temperature_2m_min[0]);
+  right.appendChild(big); right.appendChild(lab); right.appendChild(sub);
+  currentEl.appendChild(div); currentEl.appendChild(right);
+  for(var i=0;i<5;i++){
+    var card = document.createElement("article"); card.className = "day";
+    var d = document.createElement("b");
+    d.textContent = i===0 ? "Today" : new Date(daily.time[i]).toLocaleDateString(undefined,{weekday:"short", day:"numeric", month:"short"});
+    var t = document.createElement("p"); t.className = "t"; t.textContent = fmtTemp(daily.temperature_2m_max[i]) + " / " + fmtTemp(daily.temperature_2m_min[i]);
+    var l = document.createElement("span"); l.textContent = weatherLabel(daily.weather_code[i]);
+    card.appendChild(d); card.appendChild(t); card.appendChild(l); forecastEl.appendChild(card);
+  }
+  updatedEl.textContent = "Last updated: " + new Date().toLocaleTimeString(undefined,{hour:"2-digit", minute:"2-digit"});
+}
+
+function renderRecents(){
+  if(!recents.length){ recentWrap.hidden = true; return; }
+  recentWrap.hidden = false; recentEl.innerHTML = "";
+  recents.forEach(function(name){
+    var b = document.createElement("button"); b.type="button"; b.className="chip"; b.textContent = name;
+    b.addEventListener("click", function(){ cityInput.value = name; searchCity(name); });
+    recentEl.appendChild(b);
+  });
+}
+function saveRecent(name){
+  recents = [name].concat(recents.filter(function(n){ return n.toLowerCase()!==name.toLowerCase(); })).slice(0,5);
+  localStorage.setItem("recents", JSON.stringify(recents));
+  renderRecents();
+}
+
+async function searchCity(name){
+  showStatus("Loading...", "");
+  searchBtn.disabled = true; searchBtn.textContent = "Searching...";
+  try{
+    var city = await findCity(name);
+    var weather = await getWeather(city.lat, city.lon);
+    lastWeather = weather; lastCityObj = city;
+    render(weather.current, weather.daily, city);
+    showStatus("Showing weather for " + city.name + ", " + city.country, "success");
+    localStorage.setItem("lastCity", name);
+    saveRecent(city.name);
+  } catch(err){
+    showStatus(err.message, "error");
+  } finally{
+    searchBtn.disabled = false; searchBtn.textContent = "Search";
+  }
+}
+
+// Only on submit - NOT on every keypress (PDF: Free APIs have limits)
+form.addEventListener("submit", async function(e){
+  e.preventDefault();
+  var name = cityInput.value.trim();
+  if(!name){ showStatus("Type a city name.", "error"); return; }
+  await searchCity(name);
+});
+
+renderRecents();
+var last = localStorage.getItem("lastCity");
+if(last){ cityInput.value = last; searchCity(last); }
+</script>
+</body>
+</html>
